@@ -1,4 +1,4 @@
-import { Tolerances, CronoResult } from '../types';
+import { Tolerances, CronoResult, CapacityConfig, CapacityResult, TimeEntry } from '../types';
 
 /**
  * Calcula a média dos tempos
@@ -67,6 +67,63 @@ export function calculateCronoResults(
         standardTime,
         coefficientOfVariation,
         totalTolerance
+    };
+}
+
+/**
+ * Calcula a capacidade produtiva
+ * Separa processos únicos (1x no ciclo) e contínuos
+ */
+export function calculateCapacity(
+    entries: TimeEntry[],
+    rhythmFactor: number,
+    tolerances: Tolerances,
+    config: CapacityConfig
+): CapacityResult {
+    // Separar entradas por tipo
+    const singleEntries = entries.filter(e => e.processType === 'single' && e.time > 0);
+    const continuousEntries = entries.filter(e => e.processType === 'continuous' && e.time > 0);
+
+    // Calcular tempo total dos processos únicos (soma de todos)
+    const singleTimes = singleEntries.map(e => e.time);
+    const singleMean = calculateMean(singleTimes);
+    const singleNormal = calculateNormalTime(singleMean, rhythmFactor);
+    const singleTime = calculateStandardTime(singleNormal, tolerances) * singleEntries.length;
+
+    // Calcular tempo padrão dos processos contínuos (média)
+    const continuousTimes = continuousEntries.map(e => e.time);
+    const continuousMean = calculateMean(continuousTimes);
+    const continuousNormal = calculateNormalTime(continuousMean, rhythmFactor);
+    const continuousTime = calculateStandardTime(continuousNormal, tolerances);
+
+    // Calcular capacidade
+    const secondsPerShift = config.hoursPerShift * 3600;
+    const secondsPerDay = secondsPerShift * config.shiftsPerDay;
+
+    let perHour = 0;
+    let perShift = 0;
+    let perDay = 0;
+
+    if (continuousTime > 0) {
+        // Capacidade por hora (apenas processos contínuos)
+        perHour = Math.floor(3600 / continuousTime);
+
+        // Capacidade por turno (descontando tempo único no início)
+        const availableTimeShift = Math.max(0, secondsPerShift - singleTime);
+        perShift = Math.floor(availableTimeShift / continuousTime);
+
+        // Capacidade por dia (tempo único apenas 1x por dia ou por turno?)
+        // Assumindo tempo único 1x por turno
+        const availableTimeDay = Math.max(0, secondsPerDay - (singleTime * config.shiftsPerDay));
+        perDay = Math.floor(availableTimeDay / continuousTime);
+    }
+
+    return {
+        singleTime,
+        continuousTime,
+        perHour,
+        perShift,
+        perDay
     };
 }
 

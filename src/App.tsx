@@ -5,7 +5,7 @@ import { Stopwatch } from './components/Stopwatch';
 import { TimeTable } from './components/TimeTable';
 import { StatsCard } from './components/StatsCard';
 import { CronoParams, TimeEntry } from './types';
-import { calculateCronoResults, generateId } from './utils/calculations';
+import { calculateCronoResults, calculateCapacity, generateId } from './utils/calculations';
 
 const defaultParams: CronoParams = {
     operationName: '',
@@ -15,6 +15,10 @@ const defaultParams: CronoParams = {
         fatigue: 5,
         personal: 3,
         delays: 2
+    },
+    capacityConfig: {
+        hoursPerShift: 8,
+        shiftsPerDay: 1
     }
 };
 
@@ -28,12 +32,22 @@ function App() {
         document.documentElement.setAttribute('data-theme', theme);
     }, [theme]);
 
-    // Calculate results whenever entries or params change
+    // Calculate results whenever entries or params change - only for continuous processes
     const results = useMemo(() => {
-        const times = entries.map(e => e.time).filter(t => t > 0);
-        if (times.length === 0) return null;
-        return calculateCronoResults(times, params.rhythmFactor, params.tolerances);
+        const continuousTimes = entries
+            .filter(e => e.processType === 'continuous')
+            .map(e => e.time)
+            .filter(t => t > 0);
+        if (continuousTimes.length === 0) return null;
+        return calculateCronoResults(continuousTimes, params.rhythmFactor, params.tolerances);
     }, [entries, params.rhythmFactor, params.tolerances]);
+
+    // Calculate capacity
+    const capacity = useMemo(() => {
+        const validEntries = entries.filter(e => e.time > 0);
+        if (validEntries.length === 0) return null;
+        return calculateCapacity(entries, params.rhythmFactor, params.tolerances, params.capacityConfig);
+    }, [entries, params.rhythmFactor, params.tolerances, params.capacityConfig]);
 
     const handleThemeToggle = () => {
         setTheme(prev => prev === 'light' ? 'dark' : 'light');
@@ -44,6 +58,7 @@ function App() {
             id: generateId(),
             cycle: entries.length + 1,
             time: parseFloat(timeInSeconds.toFixed(2)),
+            processType: 'continuous', // Default: processo contínuo
             notes: ''
         };
         setEntries(prev => [...prev, newEntry]);
@@ -55,7 +70,11 @@ function App() {
 
             <main className="main-content">
                 {/* Stats Overview */}
-                <StatsCard results={results} entriesCount={entries.length} />
+                <StatsCard
+                    results={results}
+                    capacity={capacity}
+                    entriesCount={entries.filter(e => e.processType === 'continuous').length}
+                />
 
                 {/* Parameters and Stopwatch */}
                 <div className="section-grid">

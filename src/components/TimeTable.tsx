@@ -1,5 +1,5 @@
 import React from 'react';
-import { TimeEntry } from '../types';
+import { TimeEntry, ProcessType } from '../types';
 import { generateId } from '../utils/calculations';
 
 interface TimeTableProps {
@@ -8,11 +8,12 @@ interface TimeTableProps {
 }
 
 export const TimeTable: React.FC<TimeTableProps> = ({ entries, onEntriesChange }) => {
-    const handleAddEntry = () => {
+    const handleAddEntry = (processType: ProcessType = 'continuous') => {
         const newEntry: TimeEntry = {
             id: generateId(),
             cycle: entries.length + 1,
             time: 0,
+            processType,
             notes: ''
         };
         onEntriesChange([...entries, newEntry]);
@@ -40,6 +41,10 @@ export const TimeTable: React.FC<TimeTableProps> = ({ entries, onEntriesChange }
         onEntriesChange([]);
     };
 
+    // Contagem por tipo
+    const singleCount = entries.filter(e => e.processType === 'single').length;
+    const continuousCount = entries.filter(e => e.processType === 'continuous').length;
+
     return (
         <div className="card">
             <div className="card-header">
@@ -50,18 +55,29 @@ export const TimeTable: React.FC<TimeTableProps> = ({ entries, onEntriesChange }
                         </svg>
                     </span>
                     Tempos Cronometrados
+                    {entries.length > 0 && (
+                        <span style={{ fontSize: '0.75rem', fontWeight: 400, marginLeft: '0.5rem', color: 'var(--text-secondary)' }}>
+                            ({singleCount} únicos, {continuousCount} contínuos)
+                        </span>
+                    )}
                 </h2>
                 <div className="flex gap-2">
-                    <button className="btn btn-primary" onClick={handleAddEntry}>
+                    <button className="btn btn-primary" onClick={() => handleAddEntry('continuous')}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <line x1="12" y1="5" x2="12" y2="19" />
                             <line x1="5" y1="12" x2="19" y2="12" />
                         </svg>
-                        Adicionar
+                        + Contínuo
+                    </button>
+                    <button className="btn btn-secondary" onClick={() => handleAddEntry('single')}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="3" />
+                        </svg>
+                        + Único
                     </button>
                     {entries.length > 0 && (
                         <button className="btn btn-secondary" onClick={handleClearAll}>
-                            Limpar Tudo
+                            Limpar
                         </button>
                     )}
                 </div>
@@ -78,7 +94,8 @@ export const TimeTable: React.FC<TimeTableProps> = ({ entries, onEntriesChange }
                     </div>
                     <h3 className="empty-state-title">Nenhum tempo registrado</h3>
                     <p className="empty-state-text">
-                        Use o cronômetro para registrar voltas ou adicione manualmente
+                        <strong>Contínuo:</strong> Processos repetidos a cada ciclo<br />
+                        <strong>Único:</strong> Setup/preparação (1x por turno)
                     </p>
                 </div>
             ) : (
@@ -86,17 +103,32 @@ export const TimeTable: React.FC<TimeTableProps> = ({ entries, onEntriesChange }
                     <table className="table">
                         <thead>
                             <tr>
-                                <th style={{ width: '80px' }}>Ciclo</th>
-                                <th style={{ width: '150px' }}>Tempo (s)</th>
+                                <th style={{ width: '60px' }}>#</th>
+                                <th style={{ width: '130px' }}>Tipo</th>
+                                <th style={{ width: '120px' }}>Tempo (s)</th>
                                 <th>Observações</th>
-                                <th style={{ width: '80px' }}>Ações</th>
+                                <th style={{ width: '60px' }}>Ações</th>
                             </tr>
                         </thead>
                         <tbody>
                             {entries.map(entry => (
                                 <tr key={entry.id}>
                                     <td className="text-center font-bold">
-                                        #{entry.cycle}
+                                        {entry.cycle}
+                                    </td>
+                                    <td>
+                                        <select
+                                            className="table-input"
+                                            value={entry.processType}
+                                            onChange={(e) => handleUpdateEntry(entry.id, 'processType', e.target.value as ProcessType)}
+                                            style={{
+                                                backgroundColor: entry.processType === 'single' ? 'var(--warning-light)' : 'var(--success-light)',
+                                                fontWeight: 500
+                                            }}
+                                        >
+                                            <option value="continuous">🔄 Contínuo</option>
+                                            <option value="single">⚡ Único</option>
+                                        </select>
                                     </td>
                                     <td>
                                         <input

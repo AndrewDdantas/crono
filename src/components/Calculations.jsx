@@ -1,13 +1,21 @@
 import { useMemo } from 'react'
 
+// Format number with comma (Brazilian format)
+const formatNumber = (num, decimals = 2) => {
+    return num.toLocaleString('pt-BR', {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+    })
+}
+
 // Format seconds to readable time
 const formatTimeShort = (ms) => {
     const totalSeconds = ms / 1000
     if (totalSeconds < 60) {
-        return `${totalSeconds.toFixed(2)}s`
+        return `${formatNumber(totalSeconds, 2)}s`
     }
     const minutes = Math.floor(totalSeconds / 60)
-    const seconds = (totalSeconds % 60).toFixed(1)
+    const seconds = formatNumber(totalSeconds % 60, 1)
     return `${minutes}m ${seconds}s`
 }
 
@@ -43,13 +51,13 @@ function Calculations({ measurements, config }) {
         return {
             avgTime: formatTimeShort(avgTimeMs),
             avgFatigue: formatTimeShort(avgWithFatigueSeconds * 1000),
-            uph: uph.toFixed(2),
+            uph: formatNumber(uph, 2),
             piecesPerShift: Math.floor(piecesPerShift).toLocaleString('pt-BR'),
             piecesPerDay: Math.floor(piecesPerDay).toLocaleString('pt-BR'),
             piecesPerMonth: Math.floor(piecesPerMonth).toLocaleString('pt-BR'),
-            peopleShift: peopleShift.toFixed(2),
-            peopleDay: peopleDay.toFixed(2),
-            peopleMonth: peopleMonth.toFixed(2)
+            peopleShift: formatNumber(peopleShift, 2),
+            peopleDay: formatNumber(peopleDay, 2),
+            peopleMonth: formatNumber(peopleMonth, 2)
         }
     }, [measurements, config])
 
@@ -145,9 +153,7 @@ function CalcCard({ label, value, variant = 'default', size = 'normal' }) {
 }
 
 function PersonnelCard({ label, value }) {
-    const numValue = parseFloat(value)
-    const displayValue = Number.isInteger(numValue) ? numValue.toFixed(0) : value
-
+    // Value is already formatted with comma by formatNumber
     return (
         <div className="rounded-xl p-3 sm:p-4 text-center border transition-all duration-300
                     bg-gradient-to-br from-blue-500/20 to-blue-400/10 border-blue-500/40">
@@ -155,7 +161,7 @@ function PersonnelCard({ label, value }) {
                 {label}
             </span>
             <span className="block text-2xl sm:text-3xl font-bold text-blue-400 tabular-nums">
-                {displayValue}
+                {value}
             </span>
         </div>
     )

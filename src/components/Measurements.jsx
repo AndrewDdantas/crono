@@ -1,3 +1,6 @@
+import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
+import { supabase } from '../lib/supabase'
+
 // Format time from milliseconds to display format
 const formatTime = (ms) => {
     const totalSeconds = Math.floor(ms / 1000)
@@ -14,23 +17,68 @@ const formatTime = (ms) => {
     return `${pad(minutes)}:${pad(seconds)}.${pad(milliseconds, 3)}`
 }
 
-function Measurements({ process, onDelete, onDeleteProcess }) {
+const Measurements = forwardRef(({ process, onMeasurementsChange }, ref) => {
+    const [measurements, setMeasurements] = useState([])
+
+    useEffect(() => {
+        if (process) {
+            loadMeasurements()
+        } else {
+            setMeasurements([])
+        }
+    }, [process])
+
+    const loadMeasurements = async () => {
+        if (!process) return
+
+        try {
+            const { data, error } = await supabase
+                .from('measurements')
+                .select('*')
+                .eq('process_id', process.id)
+                .order('recorded_at', { ascending: true })
+
+            if (error) throw error
+            setMeasurements(data || [])
+            onMeasurementsChange?.(data || [])
+        } catch (error) {
+            console.error('Error loading measurements:', error)
+        }
+    }
+
+    // Expose refresh method to parent
+    useImperativeHandle(ref, () => ({
+        refresh: loadMeasurements
+    }))
+
+    const handleDelete = async (id) => {
+        try {
+            const { error } = await supabase
+                .from('measurements')
+                .delete()
+                .eq('id', id)
+
+            if (error) throw error
+
+            const newMeasurements = measurements.filter((m) => m.id !== id)
+            setMeasurements(newMeasurements)
+            onMeasurementsChange?.(newMeasurements)
+        } catch (error) {
+            console.error('Error deleting measurement:', error)
+            alert('Erro ao excluir medição: ' + error.message)
+        }
+    }
+
     if (!process) {
         return (
             <section className="glass rounded-2xl p-5">
                 <div className="text-center py-8 sm:py-12 text-gray-400">
                     <p className="text-4xl mb-3">📌</p>
-                    <p className="text-base sm:text-lg">Selecione ou crie um processo</p>
+                    <p className="text-base sm:text-lg">Selecione um processo</p>
                     <p className="text-sm text-gray-500 mt-1">para começar as medições</p>
                 </div>
             </section>
         )
-    }
-
-    const handleDeleteProcess = () => {
-        if (window.confirm('Tem certeza que deseja excluir este processo e todas as suas medições?')) {
-            onDeleteProcess()
-        }
     }
 
     return (
@@ -38,15 +86,6 @@ function Measurements({ process, onDelete, onDeleteProcess }) {
             {/* Header */}
             <div className="flex justify-between items-center mb-4 gap-3">
                 <h2 className="text-lg sm:text-xl font-semibold timer-gradient truncate">{process.name}</h2>
-                <button
-                    onClick={handleDeleteProcess}
-                    className="px-2.5 py-1.5 text-[10px] sm:text-xs font-semibold uppercase tracking-wide rounded-lg whitespace-nowrap
-                     bg-gradient-to-r from-red-500 to-red-400 text-white flex-shrink-0
-                     hover:-translate-y-0.5 active:scale-95 transition-all duration-200"
-                >
-                    <span className="sm:hidden">🗑️</span>
-                    <span className="hidden sm:inline">🗑️ Excluir</span>
-                </button>
             </div>
 
             {/* Measurements */}
@@ -54,22 +93,22 @@ function Measurements({ process, onDelete, onDeleteProcess }) {
                 <h3 className="text-xs sm:text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
                     <span>📊</span>
                     Medições
-                    {process.measurements.length > 0 && (
+                    {measurements.length > 0 && (
                         <span className="bg-primary-600/30 text-primary-300 px-2 py-0.5 rounded-full text-[10px]">
-                            {process.measurements.length}
+                            {measurements.length}
                         </span>
                     )}
                 </h3>
 
                 <div className="max-h-48 sm:max-h-64 lg:max-h-72 overflow-y-auto">
-                    {process.measurements.length === 0 ? (
+                    {measurements.length === 0 ? (
                         <div className="text-center py-8 sm:py-10 text-gray-500 text-sm">
                             <p>Nenhuma medição registrada</p>
                             <p className="text-xs mt-1 text-gray-600">Inicie o cronômetro e clique em "Registrar"</p>
                         </div>
                     ) : (
                         <div className="space-y-2">
-                            {process.measurements.map((measurement, index) => (
+                            {measurements.map((measurement, index) => (
                                 <div
                                     key={measurement.id}
                                     className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-white/5 border border-white/5
@@ -78,12 +117,12 @@ function Measurements({ process, onDelete, onDeleteProcess }) {
                                     <div className="flex items-center gap-3">
                                         <span className="text-xs text-gray-500 w-6 text-right">#{index + 1}</span>
                                         <span className="font-mono text-sm sm:text-base tabular-nums font-medium">
-                                            {formatTime(measurement.time)}
+                                            {formatTime(measurement.time_ms)}
                                         </span>
                                     </div>
                                     <button
-                                        onClick={() => onDelete(measurement.id)}
-                                        className="text-gray-500 hover:text-red-400 hover:bg-red-400/20 
+                                        onClick={() => handleDelete(measurement.id)}
+                                        className="text-gray-500 hover:text-red-400 hover:bg-red-400/20
                                px-2 py-1 rounded text-sm transition-colors opacity-50 group-hover:opacity-100"
                                         title="Remover"
                                     >
@@ -97,6 +136,8 @@ function Measurements({ process, onDelete, onDeleteProcess }) {
             </div>
         </section>
     )
-}
+})
+
+Measurements.displayName = 'Measurements'
 
 export default Measurements

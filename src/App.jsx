@@ -1,34 +1,13 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { supabase } from './lib/supabase'
+import Auth from './components/Auth'
 import Timer from './components/Timer'
 import Config from './components/Config'
+import OperationList from './components/OperationList'
 import ProcessList from './components/ProcessList'
 import Measurements from './components/Measurements'
 import Calculations from './components/Calculations'
-
-// Generate unique ID
-const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2)
-
-// Calculate work days in a month
-const getWorkDaysInMonth = (year, month, includeSaturday, includeSunday) => {
-    const daysInMonth = new Date(year, month + 1, 0).getDate()
-    let workDays = 0
-
-    for (let day = 1; day <= daysInMonth; day++) {
-        const date = new Date(year, month, day)
-        const dayOfWeek = date.getDay()
-
-        // 0 = Sunday, 6 = Saturday
-        if (dayOfWeek === 0) {
-            if (includeSunday) workDays++
-        } else if (dayOfWeek === 6) {
-            if (includeSaturday) workDays++
-        } else {
-            workDays++ // Mon-Fri always counted
-        }
-    }
-
-    return workDays
-}
 
 // Get month name in Portuguese
 const getMonthName = (month) => {
@@ -39,15 +18,42 @@ const getMonthName = (month) => {
     return months[month]
 }
 
-function App() {
+// Calculate work days in a month
+const getWorkDaysInMonth = (year, month, includeSaturday, includeSunday) => {
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    let workDays = 0
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month, day)
+        const dayOfWeek = date.getDay()
+
+        if (dayOfWeek === 0) {
+            if (includeSunday) workDays++
+        } else if (dayOfWeek === 6) {
+            if (includeSaturday) workDays++
+        } else {
+            workDays++
+        }
+    }
+
+    return workDays
+}
+
+function AppContent() {
+    const { user, signOut } = useAuth()
+
+    // Refs
+    const measurementsRef = useRef(null)
+
     // Timer state
     const [isRunning, setIsRunning] = useState(false)
     const [elapsedTime, setElapsedTime] = useState(0)
     const [startTime, setStartTime] = useState(0)
 
-    // Processes state
-    const [processes, setProcesses] = useState([])
-    const [currentProcessId, setCurrentProcessId] = useState(null)
+    // Hierarchy state
+    const [currentOperation, setCurrentOperation] = useState(null)
+    const [currentProcess, setCurrentProcess] = useState(null)
+    const [measurements, setMeasurements] = useState([])
 
     // Config state
     const now = new Date()
@@ -62,10 +68,16 @@ function App() {
         includeSunday: false
     })
 
-    // Computed work days
     const [workDays, setWorkDays] = useState(22)
 
-    // Update work days when config changes
+    // Load config from current operation
+    useEffect(() => {
+        if (currentOperation?.config) {
+            setConfig(prev => ({ ...prev, ...currentOperation.config }))
+        }
+    }, [currentOperation])
+
+    // Update work days
     useEffect(() => {
         const days = getWorkDaysInMonth(
             config.year,
@@ -76,26 +88,23 @@ function App() {
         setWorkDays(days)
     }, [config.month, config.year, config.includeSaturday, config.includeSunday])
 
-    // Load state from localStorage
+    // Save config to operation
     useEffect(() => {
-        const saved = localStorage.getItem('cronoanalise')
-        if (saved) {
-            try {
-                const data = JSON.parse(saved)
-                if (data.processes) setProcesses(data.processes)
-                if (data.currentProcessId) setCurrentProcessId(data.currentProcessId)
-                if (data.config) setConfig(prev => ({ ...prev, ...data.config }))
-            } catch (e) {
-                console.error('Error loading state:', e)
+        if (currentOperation) {
+            const updateConfig = async () => {
+                try {
+                    await supabase
+                        .from('operations')
+                        .update({ config })
+                        .eq('id', currentOperation.id)
+                } catch (error) {
+                    console.error('Error saving config:', error)
+                }
             }
+            const timeoutId = setTimeout(updateConfig, 500) // Debounce
+            return () => clearTimeout(timeoutId)
         }
-    }, [])
-
-    // Save state to localStorage
-    useEffect(() => {
-        const data = { processes, currentProcessId, config }
-        localStorage.setItem('cronoanalise', JSON.stringify(data))
-    }, [processes, currentProcessId, config])
+    }, [config, currentOperation])
 
     // Timer tick
     useEffect(() => {
@@ -125,94 +134,91 @@ function App() {
         setStartTime(0)
     }, [])
 
-    const handleLap = useCallback(() => {
-        if (!currentProcessId || elapsedTime === 0) return
+    const handleLap = useCallback(async () => {
+        if (!currentProcess || elapsedTime === 0) return
 
-        setProcesses(prev => prev.map(process => {
-            if (process.id === currentProcessId) {
-                return {
-                    ...process,
-                    measurements: [
-                        ...process.measurements,
-                        {
-                            id: generateId(),
-                            time: elapsedTime,
-                            timestamp: new Date().toISOString()
-                        }
-                    ]
-                }
+        try {
+            const { error } = await supabase
+                .from('measurements')
+                .insert([
+                    {
+                        process_id: currentProcess.id,
+                        time_ms: elapsedTime,
+                    },
+                ])
+
+            if (error) throw error
+
+            // Refresh measurements list
+            if (measurementsRef.current) {
+                measurementsRef.current.refresh()
             }
-            return process
-        }))
 
-        // Reset timer after recording
-        handleReset()
-    }, [currentProcessId, elapsedTime, handleReset])
-
-    // Process functions
-    const handleAddProcess = useCallback((name) => {
-        const newProcess = {
-            id: generateId(),
-            name,
-            measurements: [],
-            createdAt: new Date().toISOString()
+            // Reset timer after recording
+            handleReset()
+        } catch (error) {
+            console.error('Error recording measurement:', error)
+            alert('Erro ao registrar medição: ' + error.message)
         }
-        setProcesses(prev => [...prev, newProcess])
-        setCurrentProcessId(newProcess.id)
-    }, [])
+    }, [currentProcess, elapsedTime, handleReset])
 
-    const handleSelectProcess = useCallback((id) => {
-        setCurrentProcessId(id)
-    }, [])
-
-    const handleDeleteProcess = useCallback(() => {
-        if (!currentProcessId) return
-        setProcesses(prev => prev.filter(p => p.id !== currentProcessId))
-        setCurrentProcessId(null)
-    }, [currentProcessId])
-
-    const handleDeleteMeasurement = useCallback((measurementId) => {
-        setProcesses(prev => prev.map(process => {
-            if (process.id === currentProcessId) {
-                return {
-                    ...process,
-                    measurements: process.measurements.filter(m => m.id !== measurementId)
-                }
-            }
-            return process
-        }))
-    }, [currentProcessId])
-
-    // Config functions
     const handleConfigChange = useCallback((key, value) => {
         setConfig(prev => ({ ...prev, [key]: value }))
     }, [])
 
-    // Get current process
-    const currentProcess = processes.find(p => p.id === currentProcessId)
+    const handleOperationSelect = (operation) => {
+        setCurrentOperation(operation)
+        setCurrentProcess(null)
+        setMeasurements([]) // Clear measurements from previous operation
+    }
+
+    const handleProcessSelect = (process) => {
+        setCurrentProcess(process)
+        if (!process) {
+            setMeasurements([]) // Clear measurements when no process selected
+        }
+    }
+
+    const handleMeasurementsChange = (newMeasurements) => {
+        setMeasurements(newMeasurements)
+    }
 
     return (
         <div className="min-h-screen pb-6">
             {/* Timer Header */}
-            <Timer
-                elapsedTime={elapsedTime}
-                isRunning={isRunning}
-                canLap={!!currentProcessId}
-                onStart={handleStart}
-                onStop={handleStop}
-                onReset={handleReset}
-                onLap={handleLap}
-            />
+            <div className="glass border-b border-white/10">
+                <div className="flex justify-between items-center px-4 py-3">
+                    <h1 className="text-lg font-bold timer-gradient">⏱️ Cronoanalise</h1>
+                    <button
+                        onClick={signOut}
+                        className="text-xs text-gray-400 hover:text-red-400 transition-colors"
+                    >
+                        Sair
+                    </button>
+                </div>
+                <Timer
+                    elapsedTime={elapsedTime}
+                    isRunning={isRunning}
+                    canLap={!!currentProcess}
+                    onStart={handleStart}
+                    onStop={handleStop}
+                    onReset={handleReset}
+                    onLap={handleLap}
+                />
+            </div>
 
             {/* Main Content - Mobile First */}
             <main className="flex flex-col gap-4 p-4 max-w-7xl mx-auto lg:grid lg:grid-cols-[340px_1fr] lg:gap-6 lg:p-6">
-                {/* On mobile: Process selection first */}
-                <div className="lg:hidden">
+                {/* On mobile: Operations and Processes first */}
+                <div className="lg:hidden space-y-4">
+                    <OperationList
+                        currentOperationId={currentOperation?.id}
+                        onSelect={handleOperationSelect}
+                    />
                     <ProcessList
-                        processes={processes}
-                        currentProcessId={currentProcessId}
-                        onAdd={handleAddProcess}
-                        onSelect={handleSelectProcess}
+                        operationId={currentOperation?.id}
+                        currentProcessId={currentProcess?.id}
+                        onSelect={handleProcessSelect}
                     />
                 </div>
 
@@ -224,20 +230,23 @@ function App() {
                         workDays={workDays}
                         getMonthName={getMonthName}
                     />
+                    <OperationList
+                        currentOperationId={currentOperation?.id}
+                        onSelect={handleOperationSelect}
+                    />
                     <ProcessList
-                        processes={processes}
-                        currentProcessId={currentProcessId}
-                        onAdd={handleAddProcess}
-                        onSelect={handleSelectProcess}
+                        operationId={currentOperation?.id}
+                        currentProcessId={currentProcess?.id}
+                        onSelect={handleProcessSelect}
                     />
                 </aside>
 
                 {/* Content Area */}
                 <div className="flex flex-col gap-4 lg:gap-6">
                     <Measurements
+                        ref={measurementsRef}
                         process={currentProcess}
-                        onDelete={handleDeleteMeasurement}
-                        onDeleteProcess={handleDeleteProcess}
+                        onMeasurementsChange={handleMeasurementsChange}
                     />
 
                     {/* Config on mobile - after measurements */}
@@ -251,13 +260,42 @@ function App() {
                     </div>
 
                     <Calculations
-                        measurements={currentProcess?.measurements || []}
+                        measurements={measurements.map(m => ({ time: m.time_ms }))}
                         config={{ ...config, workDays }}
                     />
                 </div>
             </main>
         </div>
     )
+}
+
+function App() {
+    return (
+        <AuthProvider>
+            <AuthWrapper />
+        </AuthProvider>
+    )
+}
+
+function AuthWrapper() {
+    const { user, loading } = useAuth()
+
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                    <div className="text-4xl mb-4 timer-gradient">⏱️</div>
+                    <p className="text-gray-400">Carregando...</p>
+                </div>
+            </div>
+        )
+    }
+
+    if (!user) {
+        return <Auth />
+    }
+
+    return <AppContent />
 }
 
 export default App
